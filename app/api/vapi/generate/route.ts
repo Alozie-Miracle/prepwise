@@ -3,21 +3,78 @@ import { google } from "@ai-sdk/google";
 import { getRandomInterviewCover } from "@/lib/utils";
 import { db } from "@/firebase/admin";
 
+interface SavedMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
 export async function GET() {
   return Response.json({ success: true, data: "Thank you." }, { status: 200 });
 }
 
 export async function POST(request: Request) {
-  const { type, role, level, techstack, amount, userid } = await request.json();
+  const { messages, userid }: { messages: SavedMessage[]; userid: string } =
+    await request.json();
 
-  if (!type || !role || !level || !techstack || !amount || !userid) {
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return Response.json(
-      { success: false, error: "Missing required fields." },
+      { success: false, error: "Missing or invalid messages array." },
       { status: 400 }
     );
   }
 
   try {
+    // Compose a prompt from the message array
+    const prompt =
+      messages.map((msg) => `[${msg.role}]: ${msg.content}`).join("\n") +
+      `
+      Extract the following fields from the conversation above and return a JSON object in this format:
+      {
+        "type": "",
+        "role": "",
+        "level": "",
+        "techstack": "",
+        "amount": ""
+      }
+      Return only the JSON object.`;
+
+    const { text: aiResponse } = await generateText({
+      model: google("gemini-2.0-flash-001"),
+      prompt,
+      maxTokens: 1000,
+    });
+
+    // Try to parse the AI response as JSON
+    let extractedData;
+    try {
+      let cleaned = aiResponse.trim();
+      if (cleaned.startsWith("```")) {
+        cleaned = cleaned
+          .replace(/^```[a-zA-Z]*\n?/, "")
+          .replace(/```$/, "")
+          .trim();
+      }
+      extractedData = JSON.parse(cleaned);
+    } catch (e) {
+      return Response.json(
+        {
+          success: false,
+          error: "Failed to parse AI response as JSON.",
+          raw: aiResponse,
+        },
+        { status: 500 }
+      );
+    }
+
+    const { type, role, level, techstack, amount } = extractedData;
+
+    if (!type || !role || !level || !techstack || !amount || !userid) {
+      return Response.json(
+        { success: false, error: "Missing required fields." },
+        { status: 400 }
+      );
+    }
+
     const { text: questions } = await generateText({
       model: google("gemini-2.0-flash-001"),
       prompt: `Prepare questions for a job interview.

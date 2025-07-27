@@ -1,7 +1,9 @@
 "use client";
-import { cn } from "@/lib/utils";
+import { cn, extractInterviewInfo } from "@/lib/utils";
+import { vapi } from "@/lib/vapi.sdk";
 import Image from "next/image";
-import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import React, { useEffect, useState } from "react";
 
 enum CallStatus {
   INACTIVE = "INACTIVE",
@@ -10,16 +12,105 @@ enum CallStatus {
   FINISHED = "FINISHED",
 }
 
+interface SavedMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
 const Agent = ({ userName, type, userId }: AgentProps) => {
-  const [isSpeaking, setIsSpeaking] = useState(true);
+  const router = useRouter();
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [callStatus, setCallStatus] = useState<CallStatus>(CallStatus.INACTIVE);
+  const [messages, setMessages] = useState<SavedMessage[]>([]);
 
-  const messages = [
-    "What's your name?",
-    "My name is John Doe, nice to meet you",
-  ];
+  const lastMessage = messages[messages.length - 1]?.content || "";
+  const isCallInactiveOrFinished =
+    callStatus === CallStatus.INACTIVE || callStatus === CallStatus.FINISHED;
 
-  const lastMessage = messages[messages.length - 1];
+  useEffect(() => {
+    const onCallstart = () => setCallStatus(CallStatus.ACTIVE);
+
+    const onMessage = (message: Message) => {
+      if (message.type === "transcript" && message.transcriptType === "final") {
+        const newMessage = { role: message.role, content: message.transcript };
+        setMessages((prev) => [...prev, newMessage]);
+      }
+    };
+
+    const onSpeechStart = () => setIsSpeaking(true);
+    const onSpeechEnd = async () => {
+      setIsSpeaking(false);
+    };
+
+    const onError = (error: Error) => {
+      console.error("Error in call:", error);
+      setCallStatus(CallStatus.INACTIVE);
+    };
+
+    vapi.on("call-start", onCallstart);
+    vapi.on("message", onMessage);
+    vapi.on("speech-start", onSpeechStart);
+    vapi.on("speech-end", onSpeechEnd);
+    vapi.on("error", onError);
+    vapi.on("call-end", handleEndCall);
+
+    return () => {
+      vapi.off("call-start", onCallstart);
+      vapi.off("message", onMessage);
+      vapi.off("speech-start", onSpeechStart);
+      vapi.off("speech-end", onSpeechEnd);
+      vapi.off("error", onError);
+      vapi.off("call-end", handleEndCall);
+    };
+  }, []);
+
+  // useEffect(() => {
+  //   if (callStatus === CallStatus.FINISHED) router.push("/");
+  // }, [messages, callStatus, type, userId]);
+
+  const handleCall = async () => {
+    setCallStatus(CallStatus.CONNECTING);
+    const workflowId = process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID;
+
+    if (!workflowId) {
+      console.error(
+        "VAPI workflow ID is not defined in environment variables."
+      );
+      return;
+    }
+
+    await vapi.start(workflowId, {
+      variableValues: {
+        username: userName,
+        userid: userId,
+      },
+    });
+  };
+
+  const handleEndCall = async () => {
+    setCallStatus(CallStatus.INACTIVE);
+    vapi.stop();
+    console.log("Transcript:", messages);
+
+    try {
+      await fetch("http://localhost:3000/api/vapi/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages,
+          userid: userId,
+        }),
+      }).then((response) => {
+        console.log("Response from backend:", response);
+        router.push("/");
+      });
+      console.log("Transcript and info sent to backend.");
+    } catch (error) {
+      console.error("Failed to send transcript:", error);
+    }
+  };
 
   return (
     <>
@@ -71,7 +162,7 @@ const Agent = ({ userName, type, userId }: AgentProps) => {
 
       <div className="w-full flex justify-center">
         {callStatus !== CallStatus.ACTIVE ? (
-          <button className="relative btn-call">
+          <button className="relative btn-call" onClick={handleCall}>
             <span
               className={cn(
                 "absolute animate-ping rounded-full opacity-75",
@@ -79,16 +170,12 @@ const Agent = ({ userName, type, userId }: AgentProps) => {
               )}
             />
 
-            <span>
-              {" "}
-              {callStatus === CallStatus.INACTIVE ||
-              callStatus === CallStatus.FINISHED
-                ? "Call"
-                : "..."}
-            </span>
+            <span> {isCallInactiveOrFinished ? "Call" : "..."}</span>
           </button>
         ) : (
-          <button className="btn-disconnect">End</button>
+          <button className="btn-disconnect" onClick={handleEndCall}>
+            End
+          </button>
         )}
       </div>
     </>
