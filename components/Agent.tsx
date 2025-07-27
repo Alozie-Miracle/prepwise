@@ -1,4 +1,5 @@
 "use client";
+import { interviewer } from "@/constants";
 import { cn, extractInterviewInfo } from "@/lib/utils";
 import { vapi } from "@/lib/vapi.sdk";
 import Image from "next/image";
@@ -17,7 +18,13 @@ interface SavedMessage {
   content: string;
 }
 
-const Agent = ({ userName, type, userId }: AgentProps) => {
+const Agent = ({
+  userName,
+  type,
+  userId,
+  interviewId,
+  questions,
+}: AgentProps) => {
   const router = useRouter();
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [callStatus, setCallStatus] = useState<CallStatus>(CallStatus.INACTIVE);
@@ -64,9 +71,15 @@ const Agent = ({ userName, type, userId }: AgentProps) => {
     };
   }, []);
 
-  // useEffect(() => {
-  //   if (callStatus === CallStatus.FINISHED) router.push("/");
-  // }, [messages, callStatus, type, userId]);
+  useEffect(() => {
+    if (callStatus === CallStatus.FINISHED) {
+      if (type === "generate") {
+        router.push("/");
+      } else {
+        handleGenerateFeedback(messages);
+      }
+    }
+  }, [messages, callStatus, type, userId]);
 
   const handleCall = async () => {
     setCallStatus(CallStatus.CONNECTING);
@@ -79,12 +92,26 @@ const Agent = ({ userName, type, userId }: AgentProps) => {
       return;
     }
 
-    await vapi.start(workflowId, {
-      variableValues: {
-        username: userName,
-        userid: userId,
-      },
-    });
+    if (type === "generate") {
+      await vapi.start(workflowId, {
+        variableValues: {
+          username: userName,
+          userid: userId,
+        },
+      });
+    } else {
+      let formattedQuestions = "";
+
+      if (questions && questions.length > 0) {
+        formattedQuestions = questions.map((q) => `- ${q}`).join("\n");
+      }
+
+      await vapi.start(interviewer, {
+        variableValues: {
+          questions: formattedQuestions,
+        },
+      });
+    }
   };
 
   const handleEndCall = async () => {
@@ -92,23 +119,42 @@ const Agent = ({ userName, type, userId }: AgentProps) => {
     vapi.stop();
     console.log("Transcript:", messages);
 
-    try {
-      await fetch("http://localhost:3000/api/vapi/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages,
-          userid: userId,
-        }),
-      }).then((response) => {
-        console.log("Response from backend:", response);
-        router.push("/");
-      });
-      console.log("Transcript and info sent to backend.");
-    } catch (error) {
-      console.error("Failed to send transcript:", error);
+    if (type === "generate") {
+      try {
+        await fetch("http://localhost:3000/api/vapi/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messages,
+            userid: userId,
+          }),
+        }).then((response) => {
+          console.log("Response from backend:", response);
+          router.push("/");
+        });
+        console.log("Transcript and info sent to backend.");
+      } catch (error) {
+        console.error("Failed to send transcript:", error);
+      }
+    } else {
+    }
+  };
+
+  const handleGenerateFeedback = async (messages: SavedMessage[]) => {
+    console.log("Generate feedback here. Messages:", messages);
+
+    // TODO: create a server action to handle feedback generation
+    const { sucesss, id } = {
+      sucesss: true,
+      id: "feedback-id-placeholder",
+    };
+
+    if (sucesss && id) {
+      router.push(`/interview/${interviewId}/feedback/${id}`);
+    } else {
+      router.push("/");
     }
   };
 
