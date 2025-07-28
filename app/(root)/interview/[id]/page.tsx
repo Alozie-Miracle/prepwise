@@ -5,7 +5,6 @@ import { getInterviewsById } from "@/lib/actions/general.action";
 import { getRandomInterviewCover } from "@/lib/utils";
 import Image from "next/image";
 import { redirect } from "next/navigation";
-import React from "react";
 
 const page = async ({ params }: RouteParams) => {
   const { id } = await params;
@@ -42,6 +41,7 @@ const page = async ({ params }: RouteParams) => {
         type="interview"
         interviewId={id}
         questions={interview.questions}
+        userId={user?.id}
       />
     </>
   );

@@ -1,6 +1,7 @@
 "use client";
 import { interviewer } from "@/constants";
-import { cn, extractInterviewInfo } from "@/lib/utils";
+import { createFeedback } from "@/lib/actions/general.action";
+import { cn } from "@/lib/utils";
 import { vapi } from "@/lib/vapi.sdk";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -139,6 +140,7 @@ const Agent = ({
         console.error("Failed to send transcript:", error);
       }
     } else {
+      await handleGenerateFeedback(messages);
     }
   };
 
@@ -146,12 +148,13 @@ const Agent = ({
     console.log("Generate feedback here. Messages:", messages);
 
     // TODO: create a server action to handle feedback generation
-    const { sucesss, id } = {
-      sucesss: true,
-      id: "feedback-id-placeholder",
-    };
+    const { success, feedbackId: id } = await createFeedback({
+      interviewId,
+      userId,
+      transcript: messages,
+    } as any); // TODO: fix types
 
-    if (sucesss && id) {
+    if (success && id) {
       router.push(`/interview/${interviewId}/feedback/${id}`);
     } else {
       router.push("/");
